@@ -108,6 +108,8 @@ resource "aws_security_group" "web_server" {
 }
 
 resource "aws_instance" "web" {
+  count = 2
+
   ami           = "ami-403e2524"
   instance_type = "t2.micro" 
   monitoring    = false      
@@ -124,8 +126,15 @@ resource "aws_instance" "web" {
   }
 }
 
+# to help with attach/de-attach of eip with instances without 
+# depending on it
+resource "aws_eip_association" "web_eip_assoc" {
+  instance_id   = aws_instance.web.0.id
+  allocation_id = aws_eip.web_eip.id
+}
+
 resource "aws_eip" "web_eip" {
-  instance = aws_instance.web.id
+  instance = aws_instance.web.0.id
 
   tags = {
     Name      = "eip"
@@ -134,5 +143,5 @@ resource "aws_eip" "web_eip" {
 }
 
 output "instance_dns" {
-  value = aws_instance.web.public_dns
+  value = aws_instance.web.*.public_dns
 }
