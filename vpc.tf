@@ -124,6 +124,15 @@ resource "aws_instance" "web" {
   }
 }
 
+resource "aws_eip" "web_eip" {
+  instance = aws_instance.web.id
+
+  tags = {
+    Name      = "eip"
+    ManagedBy = "terraform"
+  }
+}
+
 output "instance_dns" {
   value = aws_instance.web.public_dns
 }
