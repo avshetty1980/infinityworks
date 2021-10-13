@@ -1,16 +1,22 @@
 variable "aws_access_key" {}
-
 variable "aws_secret_key" {}
 
+variable "ssh_key" {}
+
+#variable "private_key_path" {}
+variable "region" {
+  default = "eu-west-2"
+}
+
+variable "vpc_cidr" {
+  default = "10.0.0.0/16"
+}
 
 provider "aws" {  
   access_key = var.aws_access_key
   secret_key = var.aws_secret_key
-  region = "eu-west-2"
+  region = var.region
 }
-
-variable "ssh_key" {}
-
 resource "tls_private_key" "web_key" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -22,7 +28,7 @@ resource "aws_key_pair" "generated_key" {
 }
 
 resource "aws_vpc" "vpc" {
-  cidr_block           = "10.0.0.0/16"
+  cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
 
   tags = {
@@ -39,6 +45,18 @@ resource "aws_subnet" "subnet_1" {
 
   tags = {
     Name      = "subnet_1"
+    ManagedBy = "terraform"
+  }
+}
+
+resource "aws_subnet" "subnet_2" {
+  vpc_id                  = aws_vpc.vpc.id
+  cidr_block              = "10.0.2.0/24"
+  availability_zone       = "eu-west-2b"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name      = "subnet_2"
     ManagedBy = "terraform"
   }
 }
@@ -115,11 +133,18 @@ resource "aws_instance" "web" {
   monitoring    = false      
   user_data     = "#!/bin/bash\nyum update -y\nyum install -y httpd24\nservice httpd start"
   subnet_id     = aws_subnet.subnet_1.id
-  key_name      = aws_key_pair.generated_key.key_name
+  key_name      = aws_key_pair.generated_key.key_name #var.ssh_key
 
   vpc_security_group_ids = [
     aws_security_group.web_server.id,
   ]
+
+  # connection {
+  #   type = "ssh"
+  #   host = self.public_ip
+  #   user = "ec2-user"
+  #   private_key = file(var.private_key_path)
+  # }
 
   tags = {
     Name = "web"
@@ -142,6 +167,34 @@ resource "aws_eip" "web_eip" {
   }
 }
 
+resource "aws_elb" "clb" {
+  name = "clb"
+  instances = aws_instance.web[*].id
+  subnets = [ aws_subnet.subnet_1.id, aws_subnet.subnet_2.id ]
+  security_groups = [ aws_security_group.web_server.id ]
+
+  listener {
+    instance_port = 80
+    instance_protocol = "http"
+    lb_port = 80
+    lb_protocol = "http"
+  }
+
+  tags = {
+    Name      = "clb"
+    ManagedBy = "terraform"
+  }
+
+}
+
+# data "aws_availability_zone" "available" {
+#   state = "available"
+# }
+
 output "instance_dns" {
-  value = aws_instance.web.*.public_dns
+  value = aws_instance.web[*].public_dns
+}
+
+output "clb_dns" {
+  value = aws_elb.clb.dns_name
 }

@@ -1,6 +1,11 @@
 # Local .terraform directories
-**/.terraform/*
-
+*.terraform
+*.pem
+*.tfplan
+*.tfstate.backup
+*.lock.info
+.terraform
+.DS_Store
 # .tfstate files
 *.tfstate
 *.tfstate.*
