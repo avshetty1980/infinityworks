@@ -167,24 +167,62 @@ resource "aws_eip" "web_eip" {
   }
 }
 
-resource "aws_elb" "clb" {
-  name = "clb"
-  instances = aws_instance.web[*].id
+# resource "aws_elb" "clb" {
+#   name = "clb"
+#   instances = aws_instance.web[*].id
+#   subnets = [ aws_subnet.subnet_1.id, aws_subnet.subnet_2.id ]
+#   security_groups = [ aws_security_group.web_server.id ]
+
+#   listener {
+#     instance_port = 80
+#     instance_protocol = "http"
+#     lb_port = 80
+#     lb_protocol = "http"
+#   }
+
+#   tags = {
+#     Name      = "clb"
+#     ManagedBy = "terraform"
+#   }
+
+# }
+
+resource "aws_lb" "alb" {
+  name = "alb"
+
+  load_balancer_type = "application"
   subnets = [ aws_subnet.subnet_1.id, aws_subnet.subnet_2.id ]
   security_groups = [ aws_security_group.web_server.id ]
+}
 
-  listener {
-    instance_port = 80
-    instance_protocol = "http"
-    lb_port = 80
-    lb_protocol = "http"
+resource "aws_lb_target_group" "alb-tg" {
+  name = "alb-tg"
+  port = 80
+  protocol = "HTTP"
+  target_type = "instance"
+  vpc_id = aws_vpc.vpc.id
+
+  depends_on = [
+    aws_lb.alb
+  ]
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.alb.arn
+  port = 80
+  protocol = "HTTP"
+
+  default_action {
+    type = "forward"
+    target_group_arn = aws_lb_target_group.alb-tg.arn
   }
+}
 
-  tags = {
-    Name      = "clb"
-    ManagedBy = "terraform"
-  }
-
+resource "aws_lb_target_group_attachment" "web-tg-attach" {
+  count = length(aws_instance.web)
+  target_group_arn = aws_lb_target_group.alb-tg.arn
+  target_id = aws_instance.web[count.index].id
+  port = 80
 }
 
 # data "aws_availability_zone" "available" {
@@ -195,6 +233,10 @@ output "instance_dns" {
   value = aws_instance.web[*].public_dns
 }
 
-output "clb_dns" {
-  value = aws_elb.clb.dns_name
+# output "clb_dns" {
+#   value = aws_elb.clb.dns_name
+# }
+
+output "alb_dns" {
+  value = aws_lb.alb.dns_name
 }
