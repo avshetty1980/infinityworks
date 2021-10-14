@@ -1,7 +1,7 @@
-aws_access_key = "AKIA476ZKH6SHJXPCA7E"
+aws_access_key = "AKIA476ZKH6SK6LO256C"
 
-aws_secret_key = "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"
+aws_secret_key = "yIR9kSaX/e4aBOETpRuYN3Ba00nVBh66pdE8qbj4"
 
-#ssh_key = "infworks_key"
+#ssh_key = "infwrks_key"
 
 #private_key_path = "C:/ASH/AWS/Terraform/testing/infinityworks/infworks_key.pem"
