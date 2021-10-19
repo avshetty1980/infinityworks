@@ -17,6 +17,8 @@ provider "aws" {
   region     = var.region
 }
 
+data "aws_availability_zones" "available" {}
+
 resource "tls_private_key" "web_key" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -36,6 +38,19 @@ resource "aws_vpc" "vpc" {
     ManagedBy = "terraform"
   }
 }
+
+# resource "aws_subnet" "subnet_public" {
+#   count                   = length(var.subnet_public_list)
+#   vpc_id                  = aws_vpc.vpc.id
+#   cidr_block              = cidrsubnet(var.vpc_cidr, 2, count.index)# element(var.subnet_public_list, count.index) "10.0.1.0/24"
+#   availability_zone       = element(var.az_list, count.index)            #"eu-west-2a"
+#   map_public_ip_on_launch = true
+
+#   tags = {
+#     Name      = "subnet-${count.index + 1}"
+#     ManagedBy = "terraform"
+#   }
+# }
 
 resource "aws_subnet" "subnet_1" {
   vpc_id                  = aws_vpc.vpc.id
@@ -86,8 +101,15 @@ resource "aws_route" "route_to_gateway" {
   depends_on             = [aws_route_table.rt]
 }
 
-resource "aws_route_table_association" "subnet_1" {
-  subnet_id      = aws_subnet.subnet_1.id
+resource "aws_route_table_association" "subnet_1_assoc" {
+  # count          = length(var.subnet_public_list)
+  subnet_id      = aws_subnet.subnet_1.id #element(aws_subnet.subnet_public.*.id, count.index)
+  route_table_id = aws_route_table.rt.id
+}
+
+resource "aws_route_table_association" "subnet_2_assoc" {
+  # count          = length(var.subnet_public_list)
+  subnet_id      = aws_subnet.subnet_2.id #element(aws_subnet.subnet_public.*.id, count.index)
   route_table_id = aws_route_table.rt.id
 }
 
@@ -97,22 +119,44 @@ resource "aws_security_group" "web_server" {
   vpc_id      = aws_vpc.vpc.id
 
   ingress {
+    from_port = 80
+    to_port   = 80
+    protocol  = "tcp"
+    # cidr_blocks = ["0.0.0.0/0"]
+    security_groups = [aws_security_group.lb-sg.id]
+  }
+
+  # ingress {
+  #   from_port   = 443
+  #   to_port     = 443
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["0.0.0.0/0"]
+  # }
+
+  ingress {
+    from_port = 22
+    to_port   = 22
+    protocol  = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    #security_groups = [aws_security_group.lb-sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "lb-sg" {
+  name        = "lb-sg"
+  description = "Allow standard HTTP, and everything out"
+  vpc_id      = aws_vpc.vpc.id
+
+  ingress {
     from_port   = 80
     to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -132,15 +176,16 @@ resource "aws_instance" "web" {
   instance_type = "t2.micro"
   monitoring    = false
   user_data     = "#!/bin/bash\nyum update -y\nyum install -y httpd24\nservice httpd start"
-  subnet_id     = aws_subnet.subnet_1.id
-  key_name      = aws_key_pair.generated_key.key_name #var.ssh_key
+  subnet_id     = element([aws_subnet.subnet_1.id, aws_subnet.subnet_2.id], count.index)
+
+  key_name = aws_key_pair.generated_key.key_name #var.ssh_key
 
   vpc_security_group_ids = [
     aws_security_group.web_server.id,
   ]
 
   provisioner "remote-exec" {
-    inline = ["echo \"Hello, World from $(uname -smp)\""]
+    inline = ["echo \"SSH success into server $(uname -smp) with ip ${self.public_ip}\""]
   }
 
   connection {
@@ -157,31 +202,34 @@ resource "aws_instance" "web" {
 
 # to help with attach/de-attach of eip with instances without 
 # depending on it
-resource "aws_eip_association" "web_eip_assoc" {
-  instance_id   = aws_instance.web.0.id
-  allocation_id = aws_eip.web_eip.id
-}
+# resource "aws_eip_association" "web_eip_assoc" {
+#   instance_id   = aws_instance.web.0.id
+#   allocation_id = aws_eip.web_eip.id
+# }
 
-resource "aws_eip" "web_eip" {
-  instance = aws_instance.web.0.id
+# resource "aws_eip" "web_eip" {
+#   instance = aws_instance.web.0.id
+#   depends_on = [
+#     aws_internet_gateway.internet_gateway
+#   ]
 
-  tags = {
-    Name      = "eip"
-    ManagedBy = "terraform"
-  }
-}
+#   tags = {
+#     Name      = "eip"
+#     ManagedBy = "terraform"
+#   }
+# }
 
 # resource "aws_elb" "clb" {
-#   name = "clb"
-#   instances = aws_instance.web[*].id
-#   subnets = [ aws_subnet.subnet_1.id, aws_subnet.subnet_2.id ]
-#   security_groups = [ aws_security_group.web_server.id ]
+#   name            = "clb"
+#   instances       = aws_instance.web[*].id
+#   subnets         = [aws_subnet.subnet_1.id, aws_subnet.subnet_2.id]
+#   security_groups = [aws_security_group.lb-sg.id]
 
 #   listener {
-#     instance_port = 80
+#     instance_port     = 80
 #     instance_protocol = "http"
-#     lb_port = 80
-#     lb_protocol = "http"
+#     lb_port           = 80
+#     lb_protocol       = "http"
 #   }
 
 #   tags = {
@@ -195,8 +243,8 @@ resource "aws_lb" "alb" {
   name = "alb"
 
   load_balancer_type = "application"
-  subnets            = [aws_subnet.subnet_1.id, aws_subnet.subnet_2.id]
-  security_groups    = [aws_security_group.web_server.id]
+  subnets            = [aws_subnet.subnet_1.id, aws_subnet.subnet_2.id]#aws_subnet.subnet_public.*.id
+  security_groups    = [aws_security_group.lb-sg.id]
 }
 
 resource "aws_lb_target_group" "alb-tg" {
@@ -229,6 +277,8 @@ resource "aws_lb_target_group_attachment" "web-tg-attach" {
   port             = 80
 }
 
+
+
 #data "aws_availability_zone" "available" {}
 
 # output "ssh_public_key_pem" {
@@ -238,18 +288,18 @@ output "instance_dns" {
   value = aws_instance.web[*].public_dns
 }
 
-output "instance_public_ip" {
-  value = aws_instance.web[*].public_ip
+# output "instance_public_ip" {
+#   value = aws_instance.web[*].public_ip
 
-}
-output "instance_private_ip" {
-  value = aws_instance.web[*].private_ip
+# }
+# output "instance_private_ip" {
+#   value = aws_instance.web[*].private_ip
 
-}
+# }
 
-output "eip_public_ip" {
-  value = aws_eip.web_eip.public_ip
-}
+# output "eip_public_ip" {
+#   value = aws_eip.web_eip.public_ip
+# }
 
 # output "clb_dns" {
 #   value = aws_elb.clb.dns_name
